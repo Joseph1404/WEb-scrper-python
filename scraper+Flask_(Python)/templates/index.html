@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Extraia dados de páginas públicas com rapidez e organização.">
+    <title>WebHarbor | Coleta de dados</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+    <main class="app-shell">
+        <header class="topbar">
+            <a class="brand" href="{{ url_for('index') }}" aria-label="WebHarbor início">
+                <span class="brand-mark">W</span>
+                <span>WebHarbor</span>
+            </a>
+            <div class="topbar-actions">
+                <a class="clear-button" href="{{ url_for('limpar_conversa') }}">Nova coleta</a>
+                <span class="status-pill"><span class="status-dot"></span>Ferramenta ativa</span>
+            </div>
+        </header>
+
+        <section class="intro">
+            <p class="eyebrow">WORKSPACE DE COLETA</p>
+            <h1>Peça os dados. O scraper faz o resto.</h1>
+            <p class="intro-copy">Diga que quer dados de concorrentes, informe o site e receba a estrutura descoberta, os registros e um Excel.</p>
+        </section>
+
+        <section class="workspace-grid">
+            <form class="control-panel chat-panel" method="POST">
+                <div class="section-heading">
+                    <div class="step-number">01</div>
+                    <div>
+                        <h2>Converse com o coletor</h2>
+                        <p>Comece com o objetivo da coleta.</p>
+                    </div>
+                </div>
+                <div class="conversation">
+                    {% if not historico %}
+                        <div class="chat-bubble assistant">Envie primeiro o endereço do site que deseja analisar.</div>
+                    {% endif %}
+                    {% for mensagem in historico %}
+                        <div class="chat-bubble {{ mensagem.autor }}">{{ mensagem.texto }}</div>
+                    {% endfor %}
+                </div>
+                <label for="mensagem">Sua mensagem</label>
+                <input type="text" id="mensagem" name="mensagem" required placeholder="https://exemplo.com">
+                <input type="hidden" name="modo" value="conversa">
+                <button class="primary-button" type="submit"><span>Enviar mensagem</span><span aria-hidden="true">&#8594;</span></button>
+                <p class="privacy-note">Use somente páginas públicas e respeite os termos e limites do site consultado.</p>
+            </form>
+
+            <section class="results-panel" aria-live="polite">
+                <div class="results-heading">
+                    <div>
+                        <p class="eyebrow">02 / SAÍDA</p>
+                        <h2>Resultados</h2>
+                    </div>
+                    {% if resultados %}<span class="result-count">{{ resultados|length }} registros</span>{% endif %}
+                </div>
+                {% if erro %}
+                    <div class="message error-message"><span class="message-icon">!</span><div><strong>Não foi possível concluir</strong><p>{{ erro }}</p></div></div>
+                {% elif resultados %}
+                    {% if analise %}
+                        <div class="analysis-box">
+                            <strong>Estrutura analisada</strong>
+                            <span>{{ analise.titulo_pagina }}</span>
+                            <code>{{ analise.seletor_itens }}</code>
+                            {% for nome, seletor in analise.campos.items() %}<span>{{ nome }}: <code>{{ seletor }}</code></span>{% endfor %}
+                        </div>
+                        <a class="download-button" href="{{ download_url }}">Baixar relatório Excel <span aria-hidden="true">&#8595;</span></a>
+                    {% endif %}
+                    <div class="table-wrap"><table><thead><tr>
+                        {% for coluna in resultados[0].keys() %}<th>{{ coluna }}</th>{% endfor %}
+                    </tr></thead><tbody>
+                        {% for resultado in resultados %}<tr>{% for valor in resultado.values() %}<td>{{ valor }}</td>{% endfor %}</tr>{% endfor %}
+                    </tbody></table></div>
+                {% else %}
+                    <div class="empty-state"><div class="empty-icon">&#8595;</div><h3>Aguardando sua primeira coleta</h3><p>Os seletores descobertos e os dados extraídos aparecerão aqui.</p></div>
+                {% endif %}
+            </section>
+        </section>
+        <footer><span>WebHarbor</span><span>Coleta responsável de páginas públicas</span></footer>
+    </main>
+</body>
+</html>
