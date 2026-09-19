@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import requests
 from bs4 import BeautifulSoup
 import csv
@@ -7,65 +9,107 @@ from urllib3.util.retry import Retry
 # URL do site
 url = "https://books.toscrape.com/"
 
-print("Conectando no site...")
-sessao = requests.Session()
-retry = Retry(
-    total=3,
-    backoff_factor=1,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET"],
-)
-sessao.mount("https://", HTTPAdapter(max_retries=retry))
-
-try:
-    resposta = sessao.get(
-        url,
-        headers={"User-Agent": "ScraperPratica/1.0"},
-        timeout=15,
+def criar_sessao():
+    sessao = requests.Session()
+    retry = Retry(
+        total=3,
+        backoff_factor=1,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET"],
     )
-    resposta.raise_for_status()
-except requests.RequestException as erro:
-    print(f"Não foi possível acessar o site: {erro}")
-    raise SystemExit(1)
+    sessao.mount("https://", HTTPAdapter(max_retries=retry))
+    return sessao
 
-print("Extraindo dados...")
-soup = BeautifulSoup(resposta.text, 'html.parser')
 
-# Encontrar os livros
-livros = soup.find_all('article', class_='product_pod')
+def extrair_titulo(livro):
+    titulo_elem = livro.find(["h2", "h3"])
+    if not titulo_elem:
+        return "Título desconhecido"
 
-dados = []
+    link = titulo_elem.find("a")
+    if link:
+        titulo = link.get("title", "").strip()
+        if titulo:
+            return titulo
 
-for livro in livros:
-    titulo_elem = livro.find(['h2', 'h3'])
-    if titulo_elem:
-        link_titulo = titulo_elem.find('a')
-        titulo = ''
-        if link_titulo:
-            titulo = link_titulo.get('title', '').strip()
-            if not titulo:
-                titulo = link_titulo.get_text(strip=True)
-        if not titulo:
-            titulo = titulo_elem.get_text(strip=True)
-        if not titulo:
-            titulo = 'Título desconhecido'
+        titulo = link.get_text(strip=True)
+        if titulo:
+            return titulo
+
+    titulo = titulo_elem.get_text(strip=True)
+    return titulo if titulo else "Título desconhecido"
+
+
+def extrair_preco(livro):
+    preco_elem = livro.find("p", class_="price_color")
+    if preco_elem:
+        return preco_elem.get_text(strip=True)
+    return "Preço desconhecido"
+
+
+def extrair_classificacao(livro):
+    classificacao_elem = livro.find("p", class_="star-rating")
+    if not classificacao_elem:
+        return "Classificação desconhecida"
+
+    classes = classificacao_elem.get("class", [])
+    for classe in classes:
+        if classe.lower() in {"one", "two", "three", "four", "five"}:
+            return classe.capitalize()
+    return "Classificação desconhecida"
+
+
+def extrair_livros(url):
+    print("Conectando no site...")
+    sessao = criar_sessao()
+
+    try:
+        resposta = sessao.get(
+            url,
+            headers={"User-Agent": "ScraperPratica/1.0"},
+            timeout=15,
+        )
+        resposta.raise_for_status()
+    except requests.RequestException as erro:
+        print(f"Não foi possível acessar o site: {erro}")
+        raise SystemExit(1)
+
+    print("Extraindo dados...")
+    soup = BeautifulSoup(resposta.text, "html.parser")
+    livros = soup.find_all("article", class_="product_pod")
+
+    dados = []
+    for livro in livros:
+        titulo = extrair_titulo(livro)
+        preco = extrair_preco(livro)
+        classificacao = extrair_classificacao(livro)
+
+        dados.append([titulo, preco, classificacao])
+
+    return dados
+
+
+def salvar_csv(dados, nome_arquivo="livros_pratica.csv"):
+    caminho = Path(nome_arquivo)
+
+    with caminho.open("w", newline="", encoding="utf-8") as arquivo:
+        writer = csv.writer(arquivo)
+        writer.writerow(["Título", "Preço", "Classificação"])
+        writer.writerows(dados)
+
+    print(f"Arquivo salvo em: {caminho.resolve()}")
+
+
+def main():
+    url = "https://books.toscrape.com/"
+    dados = extrair_livros(url)
+
+    if dados:
+        salvar_csv(dados)
+        print(f"✅ PRONTO! {len(dados)} livros extraídos!")
     else:
-        titulo = 'Título desconhecido'
+        print("Nenhum livro foi encontrado.")
 
-    preco_elem = livro.find('p', class_='price_color')
-    preco = preco_elem.text if preco_elem else 'Preço desconhecido'
 
-    classificacao_elem = livro.find('p', class_='star-rating')
-    classes = classificacao_elem.get('class', []) if classificacao_elem else []
-    classificacao = classes[1] if len(classes) > 1 else 'Classificação desconhecida'
-
-    dados.append([titulo, preco, classificacao])
-
-# Salvar em CSV
-print(f"Salvando {len(dados)} livros_pratica...")
-with open('livros_pratica.csv', 'w', newline='', encoding='utf-8') as f:
-    writer = csv.writer(f)
-    writer.writerow(['Título', 'Preço', 'Classificação'])
-    writer.writerows(dados)
-
-print(f"✅ PRONTO! {len(dados)} livros extraídos!")
+if __name__ == "__main__":
+    main()
