@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Clientes | WebHarbor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="auth-page">
+    <main class="app-shell admin-shell">
+        <header class="topbar">
+            <a class="brand" href="{{ url_for('index') }}" aria-label="WebHarbor início"><span class="brand-mark">W</span><span>WebHarbor</span></a>
+            <div class="topbar-actions"><span class="status-pill"><span class="status-dot"></span>Administração</span><a class="account-link" href="{{ url_for('logout') }}">Sair</a></div>
+        </header>
+        <section class="admin-intro">
+            <p class="eyebrow">WEBHARBOR / ADMINISTRAÇÃO</p>
+            <h1>Gerencie seus clientes.</h1>
+            <p class="intro-copy">Crie acessos, entregue senhas temporárias e ajuste o limite de buscas de cada cliente.</p>
+        </section>
+        {% if erro %}<div class="message error-message" role="alert"><span class="message-icon">!</span><div><strong>Não foi possível concluir</strong><p>{{ erro }}</p></div></div>{% endif %}
+        {% if mensagem %}<div class="message success-message" role="status"><span class="message-icon success-icon">✓</span><div><strong>Cliente criado</strong><p>{{ mensagem }}</p></div></div>{% endif %}
+        <section class="admin-grid">
+            <form class="control-panel admin-create" method="post">
+                <div class="section-heading"><div class="step-number">01</div><div><h2>Novo cliente</h2><p>Acesso inicial com troca de senha obrigatória.</p></div></div>
+                <label for="email">E-mail do cliente</label>
+                <input id="email" name="email" type="email" autocomplete="off" required>
+                <label for="senha">Senha temporária</label>
+                <input id="senha" name="senha" type="text" minlength="8" required>
+                <label for="plano">Plano inicial</label>
+                <select id="plano" name="plano"><option value="gratuito">Gratuito</option><option value="basico">Básico</option><option value="profissional">Profissional</option></select>
+                <label for="limite_coletas">Limite de buscas</label>
+                <input id="limite_coletas" name="limite_coletas" type="number" min="0" value="5" required>
+                <button class="primary-button" type="submit"><span>Criar cliente</span><span aria-hidden="true">&#8594;</span></button>
+            </form>
+            <section class="control-panel admin-list" aria-labelledby="clients-title">
+                <div class="section-heading"><div class="step-number">02</div><div><h2 id="clients-title">Clientes cadastrados</h2><p>{{ usuarios|length }} contas no sistema.</p></div></div>
+                <div class="admin-table-wrap"><table class="admin-table"><caption class="sr-only">Clientes cadastrados e seus limites</caption><thead><tr><th>E-mail</th><th>Plano</th><th>Uso</th><th>Atualizar</th></tr></thead><tbody>
+                {% for usuario in usuarios %}<tr><td><strong>{{ usuario.email }}</strong>{% if usuario.senha_temporaria %}<span class="temporary-badge">Senha temporária</span>{% endif %}</td><td><form method="post" action="{{ url_for('admin_atualizar_limite', usuario_id=usuario.id) }}" class="admin-edit-form"><select name="plano" aria-label="Plano de {{ usuario.email }}"><option value="gratuito" {% if usuario.plano == 'gratuito' %}selected{% endif %}>Gratuito</option><option value="basico" {% if usuario.plano == 'basico' %}selected{% endif %}>Básico</option><option value="profissional" {% if usuario.plano == 'profissional' %}selected{% endif %}>Profissional</option></select></td><td><label class="sr-only" for="limite-{{ usuario.id }}">Limite de {{ usuario.email }}</label><input id="limite-{{ usuario.id }}" name="limite_coletas" type="number" min="0" value="{{ usuario.limite_coletas }}" aria-label="Limite de buscas de {{ usuario.email }}"> <span class="usage-inline">{{ usuario.coletas_mes }} usadas</span></td><td><button class="small-action" type="submit">Salvar</button></form></td></tr>{% endfor %}
+                </tbody></table></div>
+            </section>
+        </section>
+        <footer><span>WebHarbor</span><span>Coleta responsável de páginas públicas</span></footer>
+    </main>
+</body>
+</html>
