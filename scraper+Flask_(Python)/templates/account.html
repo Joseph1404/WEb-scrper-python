@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Minha conta | WebHarbor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body class="auth-page">
+    <main class="auth-shell account-shell">
+        <header class="topbar auth-topbar">
+            <a class="brand" href="{{ url_for('index') }}" aria-label="WebHarbor início"><span class="brand-mark">W</span><span>WebHarbor</span></a>
+            <a class="account-link" href="{{ url_for('logout') }}">Sair</a>
+        </header>
+        <section class="account-card" aria-labelledby="account-title">
+            <p class="eyebrow">WEBHARBOR / MINHA CONTA</p>
+            <h1 id="account-title">Seu espaço de coleta.</h1>
+            <p class="account-email">{{ usuario.email }}</p>
+            <div class="usage-grid">
+                <div class="usage-item"><span>Plano atual</span><strong>{{ usuario.plano|capitalize }}</strong></div>
+                <div class="usage-item"><span>Coletas usadas</span><strong>{{ usuario.coletas_mes }} / {{ limite }}</strong></div>
+            </div>
+            <div class="usage-bar" aria-label="{{ usuario.coletas_mes }} de {{ limite }} coletas utilizadas"><span style="width: {{ [usuario.coletas_mes / limite * 100, 100]|min }}%"></span></div>
+            <a class="download-button account-action" href="{{ url_for('index') }}">Voltar para a coleta <span aria-hidden="true">&#8594;</span></a>
+            <div class="danger-zone">
+                <p class="eyebrow">ZONA DE RISCO</p>
+                <h2>Excluir conta</h2>
+                <p>Essa ação remove sua conta e o histórico de coletas. Ela não pode ser desfeita.</p>
+                {% if erro_exclusao %}<div class="auth-error" role="alert">{{ erro_exclusao }}</div>{% endif %}
+                <form method="post" action="{{ url_for('excluir_conta') }}" class="delete-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <label for="excluir-senha">Confirme sua senha</label>
+                    <input id="excluir-senha" name="senha" type="password" autocomplete="current-password" required>
+                    <button class="danger-button" type="submit">Excluir minha conta</button>
+                </form>
+            </div>
+        </section>
+        <footer><span>WebHarbor</span><span>Coleta responsável de páginas públicas</span></footer>
+    </main>
+</body>
+</html>
