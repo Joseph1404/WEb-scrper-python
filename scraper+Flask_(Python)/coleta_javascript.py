@@ -5,7 +5,7 @@ MAX_PAGE_BYTES = 5 * 1024 * 1024
 BROWSER_TIMEOUT = 30_000
 
 
-def buscar_pagina_com_javascript(url, user_agent):
+def buscar_pagina_com_javascript(url, user_agent, validar_destino=None):
     try:
         from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
         from playwright.sync_api import sync_playwright
@@ -22,12 +22,19 @@ def buscar_pagina_com_javascript(url, user_agent):
                 java_script_enabled=True,
             )
             pagina.set_default_timeout(BROWSER_TIMEOUT)
-            pagina.route(
-                "**/*",
-                lambda rota: rota.abort()
-                if rota.request.resource_type in {"image", "media", "font"}
-                else rota.continue_(),
-            )
+            def filtrar_requisicao(rota):
+                if rota.request.resource_type in {"image", "media", "font"}:
+                    rota.abort()
+                    return
+                if validar_destino and rota.request.url.startswith(("http://", "https://")):
+                    try:
+                        validar_destino(rota.request.url)
+                    except ValueError:
+                        rota.abort()
+                        return
+                rota.continue_()
+
+            pagina.route("**/*", filtrar_requisicao)
             pagina.goto(url, wait_until="domcontentloaded", timeout=BROWSER_TIMEOUT)
             try:
                 pagina.wait_for_load_state("networkidle", timeout=10_000)

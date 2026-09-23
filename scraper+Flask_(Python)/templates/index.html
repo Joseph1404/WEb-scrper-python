@@ -29,6 +29,7 @@
 
         <section class="workspace-grid">
             <form class="control-panel chat-panel" method="POST" data-chat-stage="{{ etapa }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <div class="section-heading">
                     <div class="step-number">01</div>
                     <div>

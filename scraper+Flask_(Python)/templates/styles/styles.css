@@ -183,14 +183,25 @@ footer span:first-child { color: var(--ink); font-weight: 700; }
 .admin-intro { padding: 70px 0 38px; }
 .admin-intro h1 { margin-bottom: 14px; font-size: clamp(2.8rem, 6vw, 5rem); }
 .admin-grid { display: grid; grid-template-columns: minmax(300px, .7fr) minmax(0, 1.3fr); gap: 24px; align-items: start; }
+.admin-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 0 0 24px; }
+.admin-metrics article { padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.025); }
+.admin-metrics span, .history-fields { display: block; color: var(--muted); font: .68rem Arial, sans-serif; }
+.admin-metrics strong { display: block; margin-top: 6px; font-size: 1.6rem; }
 .admin-create, .admin-list { min-height: auto; }
+.collection-history { margin-top: 24px; }
+.delivery-card { margin: 24px 0; }
+.delivery-message { min-height: 205px; resize: vertical; font: .82rem/1.55 Arial, sans-serif; }
 .admin-table-wrap { overflow-x: auto; }
 .admin-table { width: 100%; min-width: 650px; border-collapse: collapse; font: .76rem Arial, sans-serif; }
 .admin-table th { padding: 0 10px 12px; color: var(--muted); text-align: left; font-size: .64rem; }
 .admin-table td { padding: 13px 10px; border-top: 1px solid var(--line); color: var(--ink); vertical-align: middle; }
 .admin-table td strong { display: block; max-width: 210px; overflow-wrap: anywhere; }
-.admin-edit-form { display: contents; }
+.admin-update-form { display: flex; align-items: center; gap: 7px; }
 .admin-table select, .admin-table input { width: auto; min-width: 92px; padding: 8px; font-size: .72rem; }
+.usage-progress { display: block; width: 100%; max-width: 115px; height: 4px; margin-top: 6px; overflow: hidden; border-radius: 99px; background: var(--line); }
+.usage-progress span { display: block; height: 100%; background: var(--accent); }
+.history-site { display: block; max-width: 240px; overflow: hidden; color: var(--accent); text-overflow: ellipsis; white-space: nowrap; }
+.admin-table code { font-size: .67rem; color: var(--muted); }
 .usage-inline { display: block; margin-top: 4px; color: var(--muted); font-size: .66rem; }
 .temporary-badge { display: inline-block; margin-top: 5px; padding: 3px 6px; color: #ffd0a8; background: rgba(255,143,107,.12); border-radius: 999px; font-size: .6rem; }
 .small-action { padding: 8px 10px; color: #111; background: var(--teal); border: 0; border-radius: 7px; cursor: pointer; font: 700 .68rem Arial, sans-serif; }
@@ -221,6 +232,7 @@ footer span:first-child { color: var(--ink); font-weight: 700; }
   .account-action { width: 100%; }
   .admin-intro { padding: 52px 0 28px; }
   .admin-grid { grid-template-columns: 1fr; }
+  .admin-metrics { grid-template-columns: 1fr; }
   .admin-table-wrap { margin-right: -22px; padding-right: 22px; }
   footer { align-items: flex-start; flex-direction: column; gap: 8px; }
 }

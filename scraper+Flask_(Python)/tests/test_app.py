@@ -1,10 +1,39 @@
+import os
+import tempfile
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import uuid4
 
 from bs4 import BeautifulSoup
 
+# A variável precisa ser definida antes de importar App, pois a aplicação
+# inicializa o banco durante a importação. Nunca use o banco local do projeto.
+TEST_DATABASE_DIR = tempfile.TemporaryDirectory(prefix="webharbor-tests-")
+TEST_DATABASE = Path(TEST_DATABASE_DIR.name) / "webharbor-test.sqlite3"
+os.environ["WEBHARBOR_DATABASE"] = str(TEST_DATABASE)
+os.environ["WEBHARBOR_ENV"] = "development"
+os.environ["WEBHARBOR_CSRF_ENABLED"] = "false"
+os.environ["WEBHARBOR_PUBLIC_SIGNUP"] = "false"
+
 import App
+
+
+def test_testes_usam_banco_temporario_isolado():
+    import database
+
+    assert database.DATABASE_PATH == TEST_DATABASE
+    assert database.DATABASE_PATH.parent == Path(TEST_DATABASE_DIR.name)
+
+
+def autenticar_cliente_no_teste(client):
+    import database
+
+    usuario_id = database.criar_usuario(
+        f"coletor-{uuid4().hex}@example.com", "senha-segura-123"
+    )
+    with client.session_transaction() as sessao:
+        sessao["usuario_id"] = usuario_id
+    return usuario_id
 
 
 def test_normalizar_url_adiciona_https_quando_falta_scheme():
@@ -23,21 +52,42 @@ def test_validar_destino_seguro_rejeita_endereco_local():
 
 
 def test_cadastro_login_e_logout():
+    import database
+
     client = App.app.test_client()
     email = f"cliente-{uuid4().hex}@example.com"
     senha = "senha-segura-123"
 
-    resposta = client.post("/cadastro", data={"email": email, "senha": senha})
-    assert resposta.status_code == 302
-    with client.session_transaction() as sessao:
-        assert sessao.get("usuario_id")
-
-    client.get("/logout")
+    database.criar_usuario(email, senha)
     resposta = client.post("/login", data={"email": email, "senha": senha})
     assert resposta.status_code == 302
     conta = client.get("/conta")
     assert conta.status_code == 200
     assert email in conta.get_data(as_text=True)
+
+
+def test_csrf_protege_formularios_quando_habilitado(monkeypatch):
+    monkeypatch.setattr(App, "CSRF_HABILITADO", True)
+    monkeypatch.setattr(App, "CADASTRO_PUBLICO_HABILITADO", True)
+    client = App.app.test_client()
+
+    bloqueada = client.post(
+        "/cadastro", data={"email": "csrf@example.com", "senha": "senha-segura-123"}
+    )
+    assert bloqueada.status_code == 400
+
+    client.get("/cadastro")
+    with client.session_transaction() as sessao:
+        token = sessao["csrf_token"]
+    aceita = client.post(
+        "/cadastro",
+        data={
+            "email": f"csrf-{uuid4().hex}@example.com",
+            "senha": "senha-segura-123",
+            "csrf_token": token,
+        },
+    )
+    assert aceita.status_code == 302
 
 
 def test_usuario_pode_excluir_conta_com_senha():
@@ -58,6 +108,20 @@ def test_usuario_pode_excluir_conta_com_senha():
     assert database.buscar_usuario(usuario_id) is None
     with client.session_transaction() as sessao:
         assert "usuario_id" not in sessao
+
+
+def test_nova_coleta_mantem_usuario_autenticado():
+    client = App.app.test_client()
+    with client.session_transaction() as sessao:
+        sessao["usuario_id"] = 123
+        sessao["etapa"] = "dados"
+
+    resposta = client.get("/limpar")
+
+    assert resposta.status_code == 302
+    with client.session_transaction() as sessao:
+        assert sessao["usuario_id"] == 123
+        assert "etapa" not in sessao
 
 
 def test_login_com_senha_temporaria_exige_troca(monkeypatch):
@@ -112,6 +176,7 @@ def test_administrador_atualiza_limite_do_cliente(monkeypatch):
     cliente = database.buscar_usuario(cliente_id)
     assert cliente["limite_coletas"] == 42
     assert cliente["plano"] == "basico"
+    assert resposta.location.endswith("/admin/usuarios")
 
 
 def test_painel_admin_visual_e_protegido(monkeypatch):
@@ -134,17 +199,55 @@ def test_painel_admin_visual_e_protegido(monkeypatch):
     assert "Clientes cadastrados" in body
 
 
+def test_admin_exibe_mensagem_de_entrega_apos_criar_cliente(monkeypatch):
+    import database
+
+    admin_email = f"entrega-admin-{uuid4().hex}@example.com"
+    admin_id = database.criar_usuario(admin_email, "senha-admin-123")
+    monkeypatch.setenv("WEBHARBOR_ADMIN_EMAIL", admin_email)
+    monkeypatch.setattr(App, "URL_PUBLICA", "https://app.webharbor.test")
+    client = App.app.test_client()
+    with client.session_transaction() as sessao:
+        sessao["usuario_id"] = admin_id
+
+    resposta = client.post(
+        "/admin/usuarios",
+        data={
+            "email": "novo-cliente@example.com",
+            "senha": "temporaria-123",
+            "plano": "basico",
+            "limite_coletas": "100",
+        },
+    )
+    corpo = resposta.get_data(as_text=True)
+
+    assert resposta.status_code == 200
+    assert "Mensagem para entregar no Fiverr" in corpo
+    assert "https://app.webharbor.test/login" in corpo
+    assert "novo-cliente@example.com" in corpo
+    assert "temporaria-123" in corpo
+
+
 def test_telas_de_autenticacao_usam_tema_webharbor():
     client = App.app.test_client()
 
     login = client.get("/login").get_data(as_text=True)
-    cadastro = client.get("/cadastro").get_data(as_text=True)
+    assert client.get("/cadastro").status_code == 404
+    assert "Criar conta" not in login
+    assert "WebHarbor" in login
+    assert "auth-card" in login
+    assert "primary-button" in login
+    assert "styles.css" in login
 
-    for pagina in (login, cadastro):
-        assert "WebHarbor" in pagina
-        assert "auth-card" in pagina
-        assert "primary-button" in pagina
-        assert "styles.css" in pagina
+
+def test_cadastro_publico_pode_ser_ativado_no_futuro(monkeypatch):
+    monkeypatch.setattr(App, "CADASTRO_PUBLICO_HABILITADO", True)
+    client = App.app.test_client()
+
+    resposta = client.get("/cadastro")
+
+    assert resposta.status_code == 200
+    assert "Criar conta" in resposta.get_data(as_text=True)
 
 
 def test_coleta_autenticada_respeita_limite_mensal(monkeypatch):
@@ -173,6 +276,28 @@ def test_coleta_autenticada_respeita_limite_mensal(monkeypatch):
 
     assert resposta.status_code == 200
     assert "limite mensal" in resposta.get_data(as_text=True)
+
+
+def test_uso_mensal_eh_zerado_ao_virar_o_ciclo(monkeypatch):
+    import database
+
+    usuario_id = database.criar_usuario(
+        f"reset-mensal-{uuid4().hex}@example.com", "senha-segura-123"
+    )
+    with database.conectar() as conexao:
+        conexao.execute(
+            "UPDATE usuarios SET coletas_mes = 5, mes_referencia = '2026-08' WHERE id = ?",
+            (usuario_id,),
+        )
+        conexao.commit()
+
+    monkeypatch.setattr(database, "mes_atual", lambda: "2026-09")
+
+    usuario = database.buscar_usuario(usuario_id)
+
+    assert usuario["coletas_mes"] == 0
+    assert usuario["mes_referencia"] == "2026-09"
+    assert database.pode_coletar(usuario)
 
 
 def test_buscar_pagina_ignora_content_length_invalido(monkeypatch):
@@ -245,6 +370,7 @@ def test_template_permite_mensagem_textual_na_etapa_de_dados():
 
 def test_historico_reinicia_coleta_com_url_selecionada():
     client = App.app.test_client()
+    autenticar_cliente_no_teste(client)
     with client.session_transaction() as sessao:
         sessao["etapa"] = "dados"
         sessao["site"] = "https://old.example"
@@ -263,6 +389,7 @@ def test_historico_reinicia_coleta_com_url_selecionada():
 
 def test_fluxo_conversa_site_para_dados_envia_mensagem_textual():
     client = App.app.test_client()
+    autenticar_cliente_no_teste(client)
 
     resp1 = client.post('/', data={'modo': 'conversa', 'mensagem': 'https://books.toscrape.com/'}, follow_redirects=True)
     assert resp1.status_code == 200
@@ -275,22 +402,18 @@ def test_fluxo_conversa_site_para_dados_envia_mensagem_textual():
     assert 'result-count' in body
 
 
-def test_fluxo_conversa_sem_site_nao_quebra():
+def test_coletor_redireciona_visitante_sem_login():
     client = App.app.test_client()
-    with client.session_transaction() as sessao:
-        sessao.clear()
 
-    resp = client.post('/', data={'modo': 'conversa', 'mensagem': 'titulo e preço'}, follow_redirects=True)
+    resp = client.get('/')
 
-    assert resp.status_code == 200
-    body = resp.get_data(as_text=True)
-    assert 'site' in body.lower() or 'URL' in body
+    assert resp.status_code == 302
+    assert resp.location.endswith('/login')
 
 
 def test_fluxo_conversa_com_mensagem_vazia_nao_quebra():
     client = App.app.test_client()
-    with client.session_transaction() as sessao:
-        sessao.clear()
+    autenticar_cliente_no_teste(client)
 
     resp = client.post('/', data={'modo': 'conversa', 'mensagem': '   '}, follow_redirects=True)
 
@@ -358,7 +481,7 @@ def test_extracao_automatica_usa_fallback_javascript(monkeypatch):
     monkeypatch.setattr(
         App,
         "buscar_pagina_com_javascript",
-        lambda url, user_agent: BeautifulSoup(html_renderizado, "html.parser"),
+        lambda url, user_agent, validar_destino=None: BeautifulSoup(html_renderizado, "html.parser"),
     )
 
     dados = App.extrair_dados_automaticos("https://example.com")

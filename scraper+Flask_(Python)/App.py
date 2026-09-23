@@ -1,13 +1,14 @@
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 import ipaddress
 import os
 import re
 import socket
 import sqlite3
+import secrets
 from uuid import uuid4
 
-from flask import Flask, redirect, render_template, render_template_string, request, send_file, session, url_for
+from flask import Flask, abort, redirect, render_template, render_template_string, request, send_file, session, url_for
 from openpyxl import Workbook
 from openpyxl.styles import Font
 import requests
@@ -22,16 +23,33 @@ from database import (
     buscar_usuario,
     criar_usuario,
     inicializar_banco,
+    listar_coletas_recentes,
     listar_usuarios,
     pode_coletar,
     registrar_coleta,
+    resumo_administrativo,
     atualizar_limite_usuario,
     atualizar_senha,
     excluir_usuario,
 )
 
+AMBIENTE_PRODUCAO = os.environ.get("WEBHARBOR_ENV", "development").lower() == "production"
+SEGREDO_SESSAO = os.environ.get("WEBHARBOR_SECRET_KEY")
+if AMBIENTE_PRODUCAO and not SEGREDO_SESSAO:
+    raise RuntimeError("WEBHARBOR_SECRET_KEY é obrigatória em produção.")
+
 app = Flask(__name__, static_folder="templates/styles", static_url_path="/static")
-app.secret_key = os.environ.get("WEBHARBOR_SECRET_KEY") or os.urandom(32)
+app.secret_key = SEGREDO_SESSAO or os.urandom(32)
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=AMBIENTE_PRODUCAO,
+    PERMANENT_SESSION_LIFETIME=timedelta(hours=8),
+    MAX_CONTENT_LENGTH=2 * 1024 * 1024,
+)
+CSRF_HABILITADO = os.environ.get("WEBHARBOR_CSRF_ENABLED", str(AMBIENTE_PRODUCAO)).lower() in {"1", "true", "yes"}
+CADASTRO_PUBLICO_HABILITADO = os.environ.get("WEBHARBOR_PUBLIC_SIGNUP", "false").lower() in {"1", "true", "yes"}
+URL_PUBLICA = os.environ.get("WEBHARBOR_PUBLIC_URL", "").rstrip("/")
 inicializar_banco()
 
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/127.0.0.0 Safari/537.36"
@@ -64,6 +82,43 @@ sessao.mount("https://", HTTPAdapter(max_retries=retry))
 relatorios = {}
 PAGINAS_CACHE = {}
 ROBOTS_CACHE = {}
+RELATORIO_TTL = timedelta(minutes=30)
+
+
+@app.context_processor
+def disponibilizar_csrf_token():
+    token = session.get("csrf_token")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["csrf_token"] = token
+    return {
+        "csrf_token": token,
+        "cadastro_publico_habilitado": CADASTRO_PUBLICO_HABILITADO,
+    }
+
+
+@app.before_request
+def proteger_requisicoes_post():
+    if not CSRF_HABILITADO or request.method in {"GET", "HEAD", "OPTIONS"}:
+        return None
+    token_enviado = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token")
+    if not token_enviado or not secrets.compare_digest(token_enviado, session.get("csrf_token", "")):
+        abort(400, "Solicitação inválida. Atualize a página e tente novamente.")
+    return None
+
+
+@app.after_request
+def adicionar_cabecalhos_seguranca(resposta):
+    resposta.headers["X-Content-Type-Options"] = "nosniff"
+    resposta.headers["X-Frame-Options"] = "DENY"
+    resposta.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    resposta.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    resposta.headers["Content-Security-Policy"] = (
+        "default-src 'self'; img-src 'self' https: data:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    )
+    return resposta
 
 
 def normalizar_url(url):
@@ -475,7 +530,9 @@ def extrair_dados_automaticos(url, incluir_imagens=False):
         return extrair_dados_da_soup(url, soup, "estatica", incluir_imagens)
     except ValueError as erro_estatico:
         try:
-            soup_renderizado = buscar_pagina_com_javascript(url, USER_AGENT)
+            soup_renderizado = buscar_pagina_com_javascript(
+                url, USER_AGENT, validar_destino=validar_destino_seguro
+            )
         except RuntimeError as erro_javascript:
             raise ValueError(
                 f"{erro_estatico} A tentativa com JavaScript não está disponível: {erro_javascript}"
@@ -505,10 +562,14 @@ def criar_excel(dados):
     return arquivo
 
 
-def guardar_relatorio(dados):
+def guardar_relatorio(dados, usuario_id=None):
     token = uuid4().hex
     arquivo = criar_excel(dados)
-    relatorios[token] = arquivo.getvalue()
+    relatorios[token] = {
+        "conteudo": arquivo.getvalue(),
+        "usuario_id": usuario_id,
+        "expira_em": datetime.now(timezone.utc) + RELATORIO_TTL,
+    }
     return token
 
 
@@ -528,6 +589,8 @@ def usuario_atual():
 
 @app.route("/cadastro", methods=["GET", "POST"])
 def cadastro():
+    if not CADASTRO_PUBLICO_HABILITADO:
+        abort(404)
     erro = None
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
@@ -537,6 +600,7 @@ def cadastro():
         else:
             try:
                 session["usuario_id"] = criar_usuario(email, senha)
+                session.permanent = True
                 return redirect(url_for("index"))
             except ValueError as exc:
                 erro = str(exc)
@@ -550,6 +614,7 @@ def login():
         usuario = autenticar_usuario(request.form.get("email") or "", request.form.get("senha") or "")
         if usuario:
             session["usuario_id"] = usuario["id"]
+            session.permanent = True
             if usuario.get("senha_temporaria"):
                 return redirect(url_for("alterar_senha"))
             return redirect(url_for("index"))
@@ -597,6 +662,7 @@ def admin_usuarios():
         return "Acesso administrativo não configurado ou não autorizado.", 403
     erro = None
     mensagem = None
+    entrega = None
     if request.method == "POST":
         email = (request.form.get("email") or "").strip().lower()
         senha = request.form.get("senha") or ""
@@ -605,12 +671,23 @@ def admin_usuarios():
             limite = int(request.form.get("limite_coletas") or 0)
             novo_id = criar_usuario(email, senha, plano, senha_temporaria=True, limite_coletas=limite)
             mensagem = f"Cliente criado. ID: {novo_id}. Solicite a troca da senha no primeiro acesso."
+            link_acesso = f"{URL_PUBLICA}{url_for('login')}" if URL_PUBLICA else url_for("login", _external=True)
+            entrega = {
+                "email": email,
+                "senha": senha,
+                "plano": plano.capitalize(),
+                "limite": limite,
+                "link_acesso": link_acesso,
+            }
         except (ValueError, sqlite3.Error) as exc:
             erro = str(exc)
     return render_template(
         "admin.html",
         administrador=administrador,
         usuarios=listar_usuarios(),
+        resumo=resumo_administrativo(),
+        coletas_recentes=listar_coletas_recentes(),
+        entrega=entrega,
         erro=erro,
         mensagem=mensagem,
     )
@@ -626,7 +703,7 @@ def admin_atualizar_limite(usuario_id):
         atualizar_limite_usuario(usuario_id, limite, plano)
     except (ValueError, sqlite3.Error) as exc:
         return str(exc), 400
-    return redirect(url_for("conta"))
+    return redirect(url_for("admin_usuarios"))
 
 
 @app.route("/conta")
@@ -677,6 +754,8 @@ def extrair_valor_generico(elemento, seletor):
 @app.route("/", methods=["GET", "POST"])
 def index():
     usuario = usuario_atual()
+    if not usuario:
+        return redirect(url_for("login"))
     if usuario and usuario.get("senha_temporaria"):
         return redirect(url_for("alterar_senha"))
     etapa = session.get("etapa", "site")
@@ -807,7 +886,7 @@ def index():
             dados["resultados"] = [resultado for resultado in dados["resultados"] if resultado]
             if not dados["resultados"]:
                 raise ValueError("Não encontrei os campos pedidos nos itens do site.")
-            token = guardar_relatorio(dados)
+            token = guardar_relatorio(dados, usuario_id=usuario["id"] if usuario else None)
             if usuario:
                 registrar_coleta(usuario["id"], dados)
             registrar_url_historico(url)
@@ -943,11 +1022,14 @@ def index():
 
 @app.route("/relatorio/<token>")
 def baixar_relatorio(token):
-    conteudo = relatorios.get(token)
-    if not conteudo:
+    relatorio = relatorios.get(token)
+    if not relatorio or relatorio["expira_em"] <= datetime.now(timezone.utc):
+        relatorios.pop(token, None)
         return "Relatório não encontrado ou expirado.", 404
+    if relatorio["usuario_id"] and relatorio["usuario_id"] != session.get("usuario_id"):
+        return "Você não tem permissão para acessar este relatório.", 403
     return send_file(
-        BytesIO(conteudo),
+        BytesIO(relatorio["conteudo"]),
         as_attachment=True,
         download_name=f"webharbor-{datetime.now():%Y%m%d-%H%M}.xlsx",
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -957,7 +1039,10 @@ def baixar_relatorio(token):
 @app.route("/limpar")
 def limpar_conversa():
     url = (request.args.get("url") or "").strip()
+    usuario_id = session.get("usuario_id")
     session.clear()
+    if usuario_id:
+        session["usuario_id"] = usuario_id
     if url:
         return redirect(url_for("index", url=url))
     return redirect(url_for("index"))

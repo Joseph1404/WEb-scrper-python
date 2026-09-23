@@ -30,6 +30,7 @@
                 </div>
                 {% if erro %}<div class="auth-error" role="alert">{{ erro }}</div>{% endif %}
                 <form method="post" class="auth-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     {% if modo != 'troca_senha' %}<label for="email">E-mail</label>
                     <input id="email" name="email" type="email" autocomplete="email" required autofocus>{% endif %}
                     <label for="senha">Senha</label>
@@ -38,7 +39,7 @@
                     {% if modo == 'cadastro' or modo == 'troca_senha' %}<small>Use pelo menos 8 caracteres.</small>{% endif %}
                     <button class="primary-button auth-submit" type="submit"><span>{% if modo == 'login' %}Entrar no WebHarbor{% elif modo == 'troca_senha' %}Salvar nova senha{% else %}Criar minha conta{% endif %}</span><span aria-hidden="true">&#8594;</span></button>
                 </form>
-                {% if modo != 'troca_senha' %}<p class="auth-switch">{% if modo == 'login' %}Ainda não tem conta? <a href="{{ url_for('cadastro') }}">Criar conta</a>{% else %}Já possui uma conta? <a href="{{ url_for('login') }}">Entrar</a>{% endif %}</p>{% endif %}
+                {% if cadastro_publico_habilitado and modo != 'troca_senha' %}<p class="auth-switch">{% if modo == 'login' %}Ainda não tem conta? <a href="{{ url_for('cadastro') }}">Criar conta</a>{% else %}Já possui uma conta? <a href="{{ url_for('login') }}">Entrar</a>{% endif %}</p>{% endif %}
             </section>
         </section>
         <footer><span>WebHarbor</span><span>Coleta responsável de páginas públicas</span></footer>

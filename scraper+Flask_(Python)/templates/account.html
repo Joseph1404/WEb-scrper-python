@@ -28,6 +28,7 @@
                 <p>Essa ação remove sua conta e o histórico de coletas. Ela não pode ser desfeita.</p>
                 {% if erro_exclusao %}<div class="auth-error" role="alert">{{ erro_exclusao }}</div>{% endif %}
                 <form method="post" action="{{ url_for('excluir_conta') }}" class="delete-form">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <label for="excluir-senha">Confirme sua senha</label>
                     <input id="excluir-senha" name="senha" type="password" autocomplete="current-password" required>
                     <button class="danger-button" type="submit">Excluir minha conta</button>
